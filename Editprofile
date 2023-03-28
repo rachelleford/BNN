@@ -1,0 +1,233 @@
+import UIKit
+import FirebaseDatabase
+import FirebaseAuth
+import FirebaseStorage
+
+struct EditProfileFormModel {
+    let label: String
+    let placeholder: String
+    var value: String?
+}
+
+final class EditProfileViewController: UIViewController, UITableViewDataSource, UITableViewDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+
+    var ref: DatabaseReference!
+    var storageRef: StorageReference!
+
+    private let tableView: UITableView = {
+        let tableView = UITableView()
+        tableView.register(FormTableViewCell.self,
+                           forCellReuseIdentifier: FormTableViewCell.identifier)
+        return tableView
+    }()
+
+    private var models = [[EditProfileFormModel]]()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        configureModels()
+        tableView.tableHeaderView = createTableHeaderView()
+        tableView.dataSource = self
+        tableView.delegate = self
+        view.addSubview(tableView)
+        view.backgroundColor = .systemBackground
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Save",
+                                                            style: .done,
+                                                            target: self,
+                                                            action: #selector(didTapSave))
+        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel",
+                                                            style: .plain,
+                                                            target: self,
+                                                            action: #selector(didTapCancel))
+        ref = Database.database().reference()
+        storageRef = Storage.storage().reference()
+        getUserProfile()
+    }
+
+    private func configureModels() {
+        let section1Labels = ["Name", "Username", "Bio"]
+        var section1 = [EditProfileFormModel]()
+        for label in section1Labels {
+            let model = EditProfileFormModel(label: label, placeholder: "Enter \(label)...", value: nil)
+            section1.append(model)
+        }
+        models.append(section1)
+
+        let section2Labels = ["Email", "Phone", "Gender"]
+        var section2 = [EditProfileFormModel]()
+        for label in section2Labels {
+            let model = EditProfileFormModel(label: label, placeholder: "Enter \(label)...", value: nil)
+            section2.append(model)
+        }
+        models.append(section2)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        tableView.frame = view.bounds
+    }
+
+    private func createTableHeaderView() -> UIView {
+        let header = UIView(frame: CGRect(x: 0,
+                                          y: 0,
+                                          width: view.width,
+                                          height: view.height/4).integral)
+        let size = header.height/1.5
+        let profilePhotoButton = UIButton(frame: CGRect(x: (view.width-size)/2,
+                                                        y: (header.height-size)/2,
+                                                        width: size,
+                                                        height: size))
+        header.addSubview(profilePhotoButton)
+        profilePhotoButton.layer.masksToBounds = true
+        profilePhotoButton.layer.cornerRadius = size/2.0
+        profilePhotoButton.tintColor = .label
+        profilePhotoButton.addTarget(self,
+                                     action: #selector(didTapProfilePhotoButton),
+                                     for: .touchUpInside)
+
+        profilePhotoButton.setBackgroundImage(UIImage(systemName: "person.circle"),
+                                              for: .normal)
+        profilePhotoButton.layer.borderWidth = 1
+        profilePhotoButton.layer.borderColor = UIColor.secondarySystemBackground.cgColor
+        return header
+    }
+
+    @objc private func didTapProfilePhotoButton() {
+        let actionSheet = UIAlertController(title: "Profile Picture",
+                                            message: "Change profile picture",
+                                            preferredStyle: .actionSheet)
+        actionSheet.addAction(UIAlertAction(title: "Take Photo", style: .default, handler: { _ in
+            self.presentImagePickerController(sourceType: .camera)
+        }))
+        actionSheet.addAction(UIAlertAction(title: "Choose from Library", style: .default, handler: { _ in
+            self.presentImagePickerController(sourceType: .photoLibrary)
+        }))
+        actionSheet.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
+
+        actionSheet.popoverPresentationController?.sourceView = view
+        actionSheet.popoverPresentationController?.sourceRect = view.bounds
+
+        present(actionSheet, animated: true)
+    }
+
+    func numberOfSections(in tableView: UITableView) -> Int {
+        return models.count
+    }
+
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return models[section].count
+    }
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let model = models[indexPath.section][indexPath.row]
+        let cell = tableView.dequeueReusableCell(withIdentifier: FormTableViewCell.identifier,
+                                                 for: indexPath) as! FormTableViewCell
+        cell.configure(with: model)
+        cell.delegate = self
+        return cell
+    }
+
+    func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        guard section == 1 else {
+            return nil
+        }
+        return "Private Information"
+    }
+
+    @objc private func didTapSave() {
+        updateUserProfile()
+    }
+
+    @objc private func didTapCancel() {
+        dismiss(animated: true,
+                completion: nil)
+    }
+
+    func presentImagePickerController(sourceType: UIImagePickerController.SourceType) {
+        let imagePickerController = UIImagePickerController()
+        imagePickerController.sourceType = sourceType
+        imagePickerController.delegate = self
+        imagePickerController.allowsEditing = true
+        present(imagePickerController, animated: true)
+    }
+
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+        picker.dismiss(animated: true)
+
+        guard let selectedImage = info[.editedImage] as? UIImage else {
+            return
+        }
+
+        // Upload the image to Firebase Storage
+        guard let imageData = selectedImage.jpegData(compressionQuality: 0.75) else {
+            return
+        }
+
+        guard let userID = Auth.auth().currentUser?.uid else {
+            return
+        }
+
+        let imageRef = storageRef.child("profileImages/\(userID).jpg")
+        imageRef.putData(imageData, metadata: nil) { (metadata, error) in
+            if let error = error {
+                print("Error uploading image: \(error.localizedDescription)")
+            } else {
+                print("Image uploaded successfully")
+            }
+        }
+    }
+
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true)
+    }
+}
+
+extension EditProfileViewController: FormTableViewCellDelegate {
+func formTableViewCell(_ cell: FormTableViewCell, didUpdateField updatedModel: EditProfileFormModel) {
+// Update the model
+}
+}
+
+    func updateUserProfile() {
+        guard let userID = Auth.auth().currentUser?.uid else { return }
+        let userProfileRef = ref.child("userProfiles").child(userID)
+    var updatedProfile: [String: Any] = [:]
+
+    for section in models {
+        for model in section {
+            if let value = model.value {
+                updatedProfile[model.label.lowercased()] = value
+            }
+        }
+    }
+
+    userProfileRef.updateChildValues(updatedProfile) { (error, _) in
+        if let error = error {
+            print("Error updating user profile: \(error.localizedDescription)")
+        } else {
+            print("User profile updated successfully")
+        }
+    }
+}
+
+func getUserProfile() {
+    guard let userID = Auth.auth().currentUser?.uid else { return }
+    let userProfileRef = ref.child("userProfiles").child(userID)
+    userProfileRef.observeSingleEvent(of: .value) { (snapshot) in
+        if let userProfileData = snapshot.value as? [String: Any] {
+            for section in 0..<self.models.count {
+                for row in 0..<self
+                        models[section].count {
+                    let key = self.models[section][row].label.lowercased()
+                    let value = userProfileData[key] as? String ?? ""
+                    self.models[section][row].value = value
+                }
+            }
+            DispatchQueue.main.async {
+                self.tableView.reloadData()
+            }
+        } else {
+            print("Error retrieving user profile data")
+        }
+    }
+}
