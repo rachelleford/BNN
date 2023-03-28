@@ -182,27 +182,35 @@ final class EditProfileViewController: UIViewController, UITableViewDataSource, 
     }
 }
 
-extension EditProfileViewController: FormTableViewCellDelegate {
-func formTableViewCell(_ cell: FormTableViewCell, didUpdateField updatedModel: EditProfileFormModel) {
-// Update the model
-}
+    extension EditProfileViewController: FormTableViewCellDelegate {
+    func formTableViewCell(_ cell: FormTableViewCell, didUpdateField updatedModel: EditProfileFormModel) {
+        // Find the updated model and update its value
+        for section in 0..<models.count {
+            for row in 0..<models[section].count {
+                if models[section][row].label == updatedModel.label {
+                    models[section][row].value = updatedModel.value
+                    return
+                }
+            }
+        }
+    }
 }
 
-    func updateUserProfile() {
-        guard let userID = Auth.auth().currentUser?.uid else { return }
-        let userProfileRef = ref.child("userProfiles").child(userID)
-    var updatedProfile: [String: Any] = [:]
+        func updateUserProfile() {
+            guard let userID = Auth.auth().currentUser?.uid else { return }
+            let userProfileRef = ref.child("userProfiles").child(userID)
+            var updatedProfile: [String: Any] = [:]
 
-    for section in models {
-        for model in section {
-            if let value = model.value {
+            for section in models {
+                for model in section {
+                if let value = model.value {
                 updatedProfile[model.label.lowercased()] = value
             }
         }
     }
 
-    userProfileRef.updateChildValues(updatedProfile) { (error, _) in
-        if let error = error {
+            userProfileRef.updateChildValues(updatedProfile) { (error, _) in
+            if let error = error {
             print("Error updating user profile: \(error.localizedDescription)")
         } else {
             print("User profile updated successfully")
@@ -210,24 +218,24 @@ func formTableViewCell(_ cell: FormTableViewCell, didUpdateField updatedModel: E
     }
 }
 
-func getUserProfile() {
-    guard let userID = Auth.auth().currentUser?.uid else { return }
-    let userProfileRef = ref.child("userProfiles").child(userID)
-    userProfileRef.observeSingleEvent(of: .value) { (snapshot) in
-        if let userProfileData = snapshot.value as? [String: Any] {
-            for section in 0..<self.models.count {
-                for row in 0..<self
-                        models[section].count {
-                    let key = self.models[section][row].label.lowercased()
-                    let value = userProfileData[key] as? String ?? ""
-                    self.models[section][row].value = value
+        func getUserProfile() {
+            guard let userID = Auth.auth().currentUser?.uid else { return }
+            let userProfileRef = ref.child("userProfiles").child(userID)
+            userProfileRef.observeSingleEvent(of: .value) { (snapshot) in
+            if let userProfileData = snapshot.value as? [String: Any] {
+                for section in 0..<self.models.count {
+                    for row in 0..<self.models[section].count {
+                        let key = self.models[section][row].label.lowercased()
+                        let value = userProfileData[key] as? String ?? ""
+                        self.models[section][row].value = value
+                    }
                 }
+                DispatchQueue.main.async {
+                    self.tableView.reloadData()
+                }
+            } else {
+                print("Error retrieving user profile data")
             }
-            DispatchQueue.main.async {
-                self.tableView.reloadData()
-            }
-        } else {
-            print("Error retrieving user profile data")
         }
     }
 }
