@@ -1,39 +1,49 @@
+//
+//  ProfileViewController.swift
+//  BNNSocialMedia
+//
+//  Created by Rachelle Ford on 3/9/23.
+//
 import UIKit
 import FirebaseAuth
 import FirebaseDatabase
 import FirebaseStorage
 
 final class ProfileViewController: UIViewController {
-
-    // MARK: - Properties
-
+    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+        return userPosts.count
+        }
+        
+    func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: PhotoCollectionViewCell.identifier, for: indexPath) as! PhotoCollectionViewCell
+        let post = userPosts[indexPath.row]
+            cell.configure(with: post)
+        return cell
+        }
+    
     private let database = Database.database().reference()
     private let storage = Storage.storage().reference()
-
-    private var collectionView: UICollectionView?
-
     private var userPosts = [UserPost]()
     private var currentUser: User?
     private var isCurrentUser: Bool {
         return currentUser?.username.lowercased() == Auth.auth().currentUser?.uid.lowercased()
     }
-
-    // MARK: - View Lifecycle
-
+    private var collectionView: UICollectionView?
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         configureNavigationBar()
-
+        
         let layout = UICollectionViewFlowLayout()
         layout.scrollDirection = .vertical
         layout.minimumLineSpacing = 1
         layout.minimumInteritemSpacing = 1
         layout.sectionInset = UIEdgeInsets(top: 0, left: 1, bottom: 0, right: 1)
-        let size = (view.width - 4) / 3
+        let size = (view.width - 4)/3
         layout.itemSize = CGSize(width: size, height: size)
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
-
+        
         // Cell
         collectionView?.register(PhotoCollectionViewCell.self,
                                  forCellWithReuseIdentifier: PhotoCollectionViewCell.identifier)
@@ -44,30 +54,30 @@ final class ProfileViewController: UIViewController {
         collectionView?.register(ProfileTabsCollectionReusableView.self,
                                  forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
                                  withReuseIdentifier: ProfileTabsCollectionReusableView.identifier)
-
+        
         collectionView?.delegate = self
         collectionView?.dataSource = self
-        guard let collectionView = collectionView else { return }
+        guard let collectionView = collectionView else {return}
         view.addSubview(collectionView)
-
-        // Fetch user data
+        
+        
+        //fetch current user
         fetchCurrentUser()
     }
-
+    
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         collectionView?.frame = view.bounds
     }
-
-    // MARK: - Private Methods
-
+    
     private func configureNavigationBar() {
-        navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "gear"),
-                                                            style: .done,
-                                                            target: self,
-                                                            action: #selector(didTapSettingsButton))
+        navigationItem.rightBarButtonItem =
+        UIBarButtonItem(image: UIImage(systemName: "gear"),
+                        style: .done,
+                        target: self,
+                        action: #selector(didTapSettingsButton))
     }
-
+    
     private func fetchCurrentUser() {
         guard let currentUserID = Auth.auth().currentUser?.uid else {
             return
@@ -84,196 +94,278 @@ final class ProfileViewController: UIViewController {
             let birthDateString = userData["birthdate"] as? String ?? ""
             let genderRawValue = userData["gender"] as? String ?? ""
             let joinDateString = userData["joinDate"] as? String ?? ""
-
+            
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss Z"
             let birthDate = dateFormatter.date(from: birthDateString) ?? Date()
             let joinDate = dateFormatter.date(from: joinDateString) ?? Date()
             let gender = User.Gender(rawValue: genderRawValue) ?? .other
-            let profilePhotoURL = URL(string: profilePhotoURLString)
-
-            let counts = UserCount(followers: 0, following: 0, posts: 
-            private func updateDatabase(with data: [String: Any]) {
-        guard let uid = Auth.auth().currentUser?.uid else {
-            return
-        }
-
-        // Update the database for the user
-        DatabaseManager.shared.updateUser(with: uid, data: data) { [weak self] success in
-            if success {
-                print("Updated database successfully")
-                self?.dismiss(animated: true, completion: nil)
-            } else {
-                print("Failed to update database")
-            }
-        }
-    }
-
-    private func uploadProfilePicture() {
-        guard let data = profilePictureImageView.image?.jpegData(compressionQuality: 0.4),
-              let fileName = Auth.auth().currentUser?.uid else {
-            return
-        }
-
-        let path = "profile_pictures/\(fileName).jpg"
-
-        // Upload profile picture to Firebase Storage
-        StorageManager.shared.uploadProfilePicture(with: data, path: path) { [weak self] result in
-            switch result {
-            case .success(let downloadURL):
-                UserDefaults.standard.set(downloadURL, forKey: "profile_picture_url")
-                print("Uploaded profile picture: \(downloadURL)")
-                guard let data = self?.userInfo else {
-                    return
-                }
-                var updatedData = data
-                updatedData["profile_picture_url"] = downloadURL
-
-                // Update the database with the new profile picture URL
-                self?.updateDatabase(with: updatedData)
-
-            case .failure(let error):
-                print("Failed to upload profile picture: \(error)")
-            }
-        }
-    }
-
-    @objc private func didTapSaveButton() {
-        guard let firstName = firstNameTextField.text,
-              let lastName = lastNameTextField.text,
-              let username = usernameTextField.text,
-              let bio = bioTextField.text else {
-            return
-        }
-
-        var data = [
-            "first_name": firstName,
-            "last_name": lastName,
-            "username": username,
-            "bio": bio
-        ]
-
-        if let website = websiteTextField.text, !website.isEmpty {
-            data["website"] = website
-        }
-
-        if let email = emailTextField.text, !email.isEmpty {
-            data["email"] = email
-        }
-
-        if let phoneNumber = phoneNumberTextField.text, !phoneNumber.isEmpty {
-            data["phone_number"] = phoneNumber
-        }
-
-        // Check if a new profile picture has been selected
-        if let newImage = profilePictureImageView.image,
-           newImage != profilePicture {
-            uploadProfilePicture()
-        } else {
-            // If no new profile picture was selected, just update the database with the other data
-            updateDatabase(with: data)
-        }
-    }
-// MARK: - EditProfileViewControllerDelegate
-
-extension ProfileViewController: EditProfileViewControllerDelegate {
-    
-    func didSaveProfile(with username: String, name: String, website: String, bio: String) {
-        
-        guard let currentUser = Auth.auth().currentUser else {
-            return
+            let profilePhoto = URL(string: profilePhotoURLString)
+            let counts = UserCount(followers: 0, following: 0, posts: 0)
+            self?.currentUser = User(username: username,
+                                     email: email,
+                                     firstName: firstName,
+                                     lastName: lastName,
+                                     birthDate: birthDate,
+                                     gender: gender,
+                                     profilePhotoURL: profilePhotoURL,
+                                     joinDate: joinDate,
+                                     counts: counts)
+            
+            self?.navigationItem.title = username
+            self?.collectionView?.reloadData()
+            
+            // Fetch user posts
+            self?.fetchUserPosts()
         }
         
-        let uid = currentUser.uid
-        
-        let documentData: [String: Any] = [
-            "username": username,
-            "name": name,
-            "website": website,
-            "bio": bio
-        ]
-        
-        let db = Firestore.firestore()
-        
-        db.collection("users").document(uid).updateData(documentData) { [weak self] error in
-            guard let self = self else { return }
-            if let error = error {
-                self.showError(error.localizedDescription)
-            } else {
-                self.loadUserData()
-            }
-        }
-    }
-    
-    func didChangeProfilePhoto() {
-        showPhotoActionSheet()
-    }
-}
-
-// MARK: - UIImagePickerControllerDelegate
-
-extension ProfileViewController: UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-    
-    func presentPhotoPicker(sourceType: UIImagePickerController.SourceType) {
-        let picker = UIImagePickerController()
-        picker.delegate = self
-        picker.allowsEditing = true
-        picker.sourceType = sourceType
-        present(picker, animated: true)
-    }
-    
-    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-        picker.dismiss(animated: true, completion: nil)
-    }
-    
-    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
-        guard let selectedImage = info[.editedImage] as? UIImage else {
-            return
-        }
-        
-        picker.dismiss(animated: true) { [weak self] in
-            self?.uploadProfilePhoto(image: selectedImage)
-        }
-    }
-    
-    func uploadProfilePhoto(image: UIImage) {
-        guard let currentUser = Auth.auth().currentUser else {
-            return
-        }
-        
-        let uid = currentUser.uid
-        let storageRef = Storage.storage().reference().child("profile_images/\(uid).png")
-        
-        guard let imageData = image.pngData() else {
-            return
-        }
-        
-        storageRef.putData(imageData, metadata: nil) { [weak self] _, error in
-            guard error == nil else {
-                self?.showError(error!.localizedDescription)
+        private func fetchUserPosts() {
+            guard let currentUser = self.currentUser else {
                 return
             }
-            
-            storageRef.downloadURL { [weak self] url, error in
-                guard let url = url, error == nil else {
-                    self?.showError(error!.localizedDescription)
+            let username = currentUser.username
+            database.child("users").child(username).child("posts").observeSingleEvent(of: .value) { [weak self] snapshot in
+                guard let posts = snapshot.value as? [[String: Any]] else {
                     return
                 }
-                
-                let urlString = url.absoluteString
-                
-                let db = Firestore.firestore()
-                
-                db.collection("users").document(uid).updateData(["profile_photo_url": urlString]) { error in
-                    if let error = error {
-                        self?.showError(error.localizedDescription)
-                    } else {
-                        self?.loadUserData()
+                let userPosts = posts.compactMap { dictionary -> UserPost? in
+                    guard let caption = dictionary["caption"] as? String,
+                          let thumbnailImageURLString = dictionary["thumbnail_image_url"] as? String,
+                          let fullImageURLString = dictionary["full_image_url"] as? String,
+                          let timestamp = dictionary["timestamp"] as? TimeInterval,
+                          let likes = dictionary["likes"] as? Int,
+                          let comments = dictionary["comments"] as? Int else {
+                        return nil
                     }
+                    let thumbnailImageURL = URL(string: thumbnailImageURLString)
+                    let fullImageURL = URL(string: fullImageURLString)
+                    return UserPost(identifier: "",
+                                    postType: .photo,
+                                    thumbnailImageURL: thumbnailImageURL,
+                                    fullImageURL: fullImageURL,
+                                    caption: caption,
+                                    timestamp: Date(timeIntervalSince1970: timestamp),
+                                    likes: likes,
+                                    comments: comments)
                 }
+                self?.userPosts = userPosts
+                self?.collectionView?.reloadData()
             }
+        }
+        
+        private func showSettings() {
+            let alertController = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+            alertController.addAction(UIAlertAction(title: "Edit Profile", style: .default, handler: { [weak self] _ in
+                self?.didTapEditProfile()
+            }))
+            alertController.addAction(UIAlertAction(title: "Log Out", style: .destructive, handler: { [weak self] _ in
+                do {
+                    try Auth.auth().signOut()
+                    let loginVC = LoginViewController()
+                    let navVC = UINavigationController(rootViewController: loginVC)
+                    navVC.modalPresentationStyle = .fullScreen
+                    self?.present(navVC, animated: true, completion: nil)
+                } catch {
+                    print("Failed to log out")
+                }
+            }))
+            alertController.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
+            present(alertController, animated: true, completion: nil)
+        }
+        
+        private func didTapSettingsButton() {
+            showSettings()
+        }
+        
+        private func didTapEditProfile() {
+            let editProfileVC = EditProfileViewController()
+            editProfileVC.userInfo = [
+                "first_name": currentUser?.firstName ?? "",
+                "last_name": currentUser?.lastName ?? "",
+                "username": currentUser?.username ?? "",
+                "email": currentUser?.email ?? "",
+                "bio": "",
+                "website": "",
+                "phone_number": ""
+            ]
+            editProfileVC.delegate = self
+            let navVC = UINavigationController(rootViewController: editProfileVC)
+            navVC.modalPresentationStyle = .fullScreen
+            present(navVC, animated: true, completion: nil)
+        }
+        
+        private func showPhotoActionSheet() {
+            let actionSheet = UIAlertController(title: "Profile Picture",
+                                                message: "Select a method to choose a picture",
+                                                preferredStyle: .actionSheet)
+            actionSheet.addAction(UIAlertAction(title: "Cancel",
+                                                style: .cancel,
+                                                handler: nil))
+            actionSheet.addAction(UIAlertAction(title: "Take Photo",
+                                                style: .default,
+                                                handler: { [weak self] _ in
+                self?.presentPhotoPicker(sourceType: .camera)
+            }))
+            actionSheet.addAction(UIAlertAction(title: "Choose Photo",
+                                                style: .default,
+                                                handler: { [weak self] _ in
+                self?.presentPhotoPicker(sourceType: .photoLibrary)
+            }))
+            present(actionSheet, animated: true)
+        }
+        
+        func showError(_ message: String) {
+            let alert = UIAlertController(title: "Error",
+                                          message: message,
+                                          preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "Dismiss",
+                                          style: .cancel,
+                                          handler: nil))
+            present(alert, animated: true)
+        }
+        
+        
+        @objc private func didTapSettingsButton() {
+            let vc = SettingsViewController()
+            vc.title = "Settings"
+            navigationController?.pushViewController(vc, animated: true)
+        }
+        
+    }
+    
+    extension ProfileViewController: UICollectionViewDelegate, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
+        func numberOfSections(in collectionView: UICollectionView) -> Int {
+            return 2
+        }
+        
+        func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+            if section == 0 {
+                return 0
+            }
+            //        return userPosts.count
+            return 30
+        }
+        
+        func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+            //let model = userPosts[indexPath.row]
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: PhotoCollectionViewCell.identifier,
+                                                          for: indexPath) as! PhotoCollectionViewCell
+            //cell.configure(with: model)
+            cell.configure(debug: "test")
+            return cell
+        }
+        
+        func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+            collectionView.deselectItem(at: indexPath, animated: true)
+            
+            // get the model and open post controller
+            //let model = userPosts[indexPath.row]
+            let user = User(username: "joe",
+                            bio: "",
+                            name: (first: "", last: ""),
+                            profilePhoto: URL(string: "https://www.google.com")!,
+                            b
+                            
+                            irthDate: Date(),
+                            gender: .male,
+                            counts: UserCount(followers: 1, following: 1, posts: 1),
+                            joinDate: Date())
+            let post = UserPost(identifier: "",
+                                postType: .photo,
+                                thumbnailImage: URL(string: "https://www.google.com/")!,
+                                postURL: URL(string: "https://www.google.com/")!,
+                                caption: nil,
+                                likeCount: [],
+                                comments: [],
+                                createdDate: Date(),
+                                taggedUsers: [],
+                                owner: user)
+            let vc = PostViewController(model: post)
+            vc.title = post.postType.rawValue
+            vc.navigationItem.largeTitleDisplayMode = .never
+            navigationController?.pushViewController(vc, animated: true)
+        }
+        
+        func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
+            
+            guard kind == UICollectionView.elementKindSectionHeader else {
+                // footer
+                return UICollectionReusableView()
+            }
+            
+            if indexPath.section == 1 {
+                // tabs header
+                let tabControlHeader = collectionView.dequeueReusableSupplementaryView(ofKind: kind,
+                                                                                       withReuseIdentifier: ProfileTabsCollectionReusableView.identifier,
+                                                                                       for: indexPath) as! ProfileTabsCollectionReusableView
+                tabControlHeader.delegate = self
+                return tabControlHeader
+            }
+            
+            let profileHeader = collectionView.dequeueReusableSupplementaryView(ofKind: kind,
+                                                                                withReuseIdentifier: ProfileInfoHeaderCollectionReusableView.identifier,
+                                                                                for: indexPath) as! ProfileInfoHeaderCollectionReusableView
+            profileHeader.delegate = self
+            return profileHeader
+        }
+        
+        func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, referenceSizeForHeaderInSection section: Int) -> CGSize {
+            if section == 0 {
+                return CGSize(width: collectionView.width,
+                              height: collectionView.height/3)
+            }
+            
+            // Size of section tabs
+            return CGSize(width: collectionView.width,
+                          height: 50)
+        }
+        
+    }
+    
+    // MARK: - ProfileInfoHeaderCollectionReusableViewDelegate
+    extension ProfileViewController: ProfileInfoHeaderCollectionReusableViewDelegate {
+        func profileHeaderDidTapPostsButton(_ header: ProfileInfoHeaderCollectionReusableView) {
+            // scroll to the posts
+            collectionView?.scrollToItem(at: IndexPath(row: 0, section: 1), at: .top, animated: true)
+        }
+        
+        func profileHeaderDidTapFollowersButton(_ header: ProfileInfoHeaderCollectionReusableView) {
+            var mockData = [UserRelationship]()
+            for x in 0..<10 {
+                mockData.append(UserRelationship(username: "@joe", namm: "Joe Smith", type: x % 2 == 0 ? .following : .not_following))
+            }
+            let vc = ListViewController(data: mockData)
+            vc.title = "Followers"
+            vc.navigationItem.largeTitleDisplayMode = .never
+            navigationController?.pushViewController(vc, animated: true)
+        }
+        
+        func profileHeaderDidTapFollowingButton(_ header: ProfileInfoHeaderCollectionReusableView) {
+            var mockData = [UserRelationship]()
+            for x in 0..<10 {
+                mockData.append(UserRelationship(username: "@joe", namm: "Joe Smith", type: x % 2 == 0 ? .following : .not_following))
+            }
+            let vc = ListViewController(data: mockData)
+            vc.title = "Following"
+            vc.navigationItem.largeTitleDisplayMode = .never
+            navigationController?.pushViewController(vc, animated: true)
+        }
+        
+        func profileHeaderDidTapEditProfileButton(_ header: ProfileInfoHeaderCollectionReusableView) {
+            let vc = EditProfileViewController()
+            vc.title = "Edit Profile"
+            present(UINavigationController(rootViewController: vc), animated: true)
+        }
+        
+    }
+    
+    extension ProfileViewController: ProfileTabsCollectionReusableViewDelegate {
+        func didTapGridButtonTab() {
+            // Reload collection view with data
+        }
+        
+        func didTapTaggedButtonTab() {
+            // Reload collection view with data
         }
     }
 }
-
-
