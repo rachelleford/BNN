@@ -1,0 +1,279 @@
+import UIKit
+import FirebaseAuth
+import FirebaseDatabase
+import FirebaseStorage
+
+final class ProfileViewController: UIViewController {
+
+    // MARK: - Properties
+
+    private let database = Database.database().reference()
+    private let storage = Storage.storage().reference()
+
+    private var collectionView: UICollectionView?
+
+    private var userPosts = [UserPost]()
+    private var currentUser: User?
+    private var isCurrentUser: Bool {
+        return currentUser?.username.lowercased() == Auth.auth().currentUser?.uid.lowercased()
+    }
+
+    // MARK: - View Lifecycle
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        configureNavigationBar()
+
+        let layout = UICollectionViewFlowLayout()
+        layout.scrollDirection = .vertical
+        layout.minimumLineSpacing = 1
+        layout.minimumInteritemSpacing = 1
+        layout.sectionInset = UIEdgeInsets(top: 0, left: 1, bottom: 0, right: 1)
+        let size = (view.width - 4) / 3
+        layout.itemSize = CGSize(width: size, height: size)
+        collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+
+        // Cell
+        collectionView?.register(PhotoCollectionViewCell.self,
+                                 forCellWithReuseIdentifier: PhotoCollectionViewCell.identifier)
+        // Headers
+        collectionView?.register(ProfileInfoHeaderCollectionReusableView.self,
+                                 forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
+                                 withReuseIdentifier: ProfileInfoHeaderCollectionReusableView.identifier)
+        collectionView?.register(ProfileTabsCollectionReusableView.self,
+                                 forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
+                                 withReuseIdentifier: ProfileTabsCollectionReusableView.identifier)
+
+        collectionView?.delegate = self
+        collectionView?.dataSource = self
+        guard let collectionView = collectionView else { return }
+        view.addSubview(collectionView)
+
+        // Fetch user data
+        fetchCurrentUser()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        collectionView?.frame = view.bounds
+    }
+
+    // MARK: - Private Methods
+
+    private func configureNavigationBar() {
+        navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "gear"),
+                                                            style: .done,
+                                                            target: self,
+                                                            action: #selector(didTapSettingsButton))
+    }
+
+    private func fetchCurrentUser() {
+        guard let currentUserID = Auth.auth().currentUser?.uid else {
+            return
+        }
+        database.child("users").child(currentUserID).observeSingleEvent(of: .value) { [weak self] snapshot in
+            guard let userData = snapshot.value as? [String: Any] else {
+                return
+            }
+            let username = userData["username"] as? String ?? ""
+            let email = userData["email"] as? String ?? ""
+            let firstName = userData["firstName"] as? String ?? ""
+            let lastName = userData["lastName"] as? String ?? ""
+            let profilePhotoURLString = userData["profilePhotoURL"] as? String ?? ""
+            let birthDateString = userData["birthdate"] as? String ?? ""
+            let genderRawValue = userData["gender"] as? String ?? ""
+            let joinDateString = userData["joinDate"] as? String ?? ""
+
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss Z"
+            let birthDate = dateFormatter.date(from: birthDateString) ?? Date()
+            let joinDate = dateFormatter.date(from: joinDateString) ?? Date()
+            let gender = User.Gender(rawValue: genderRawValue) ?? .other
+            let profilePhotoURL = URL(string: profilePhotoURLString)
+
+            let counts = UserCount(followers: 0, following: 0, posts: 
+            private func updateDatabase(with data: [String: Any]) {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            return
+        }
+
+        // Update the database for the user
+        DatabaseManager.shared.updateUser(with: uid, data: data) { [weak self] success in
+            if success {
+                print("Updated database successfully")
+                self?.dismiss(animated: true, completion: nil)
+            } else {
+                print("Failed to update database")
+            }
+        }
+    }
+
+    private func uploadProfilePicture() {
+        guard let data = profilePictureImageView.image?.jpegData(compressionQuality: 0.4),
+              let fileName = Auth.auth().currentUser?.uid else {
+            return
+        }
+
+        let path = "profile_pictures/\(fileName).jpg"
+
+        // Upload profile picture to Firebase Storage
+        StorageManager.shared.uploadProfilePicture(with: data, path: path) { [weak self] result in
+            switch result {
+            case .success(let downloadURL):
+                UserDefaults.standard.set(downloadURL, forKey: "profile_picture_url")
+                print("Uploaded profile picture: \(downloadURL)")
+                guard let data = self?.userInfo else {
+                    return
+                }
+                var updatedData = data
+                updatedData["profile_picture_url"] = downloadURL
+
+                // Update the database with the new profile picture URL
+                self?.updateDatabase(with: updatedData)
+
+            case .failure(let error):
+                print("Failed to upload profile picture: \(error)")
+            }
+        }
+    }
+
+    @objc private func didTapSaveButton() {
+        guard let firstName = firstNameTextField.text,
+              let lastName = lastNameTextField.text,
+              let username = usernameTextField.text,
+              let bio = bioTextField.text else {
+            return
+        }
+
+        var data = [
+            "first_name": firstName,
+            "last_name": lastName,
+            "username": username,
+            "bio": bio
+        ]
+
+        if let website = websiteTextField.text, !website.isEmpty {
+            data["website"] = website
+        }
+
+        if let email = emailTextField.text, !email.isEmpty {
+            data["email"] = email
+        }
+
+        if let phoneNumber = phoneNumberTextField.text, !phoneNumber.isEmpty {
+            data["phone_number"] = phoneNumber
+        }
+
+        // Check if a new profile picture has been selected
+        if let newImage = profilePictureImageView.image,
+           newImage != profilePicture {
+            uploadProfilePicture()
+        } else {
+            // If no new profile picture was selected, just update the database with the other data
+            updateDatabase(with: data)
+        }
+    }
+// MARK: - EditProfileViewControllerDelegate
+
+extension ProfileViewController: EditProfileViewControllerDelegate {
+    
+    func didSaveProfile(with username: String, name: String, website: String, bio: String) {
+        
+        guard let currentUser = Auth.auth().currentUser else {
+            return
+        }
+        
+        let uid = currentUser.uid
+        
+        let documentData: [String: Any] = [
+            "username": username,
+            "name": name,
+            "website": website,
+            "bio": bio
+        ]
+        
+        let db = Firestore.firestore()
+        
+        db.collection("users").document(uid).updateData(documentData) { [weak self] error in
+            guard let self = self else { return }
+            if let error = error {
+                self.showError(error.localizedDescription)
+            } else {
+                self.loadUserData()
+            }
+        }
+    }
+    
+    func didChangeProfilePhoto() {
+        showPhotoActionSheet()
+    }
+}
+
+// MARK: - UIImagePickerControllerDelegate
+
+extension ProfileViewController: UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    
+    func presentPhotoPicker(sourceType: UIImagePickerController.SourceType) {
+        let picker = UIImagePickerController()
+        picker.delegate = self
+        picker.allowsEditing = true
+        picker.sourceType = sourceType
+        present(picker, animated: true)
+    }
+    
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true, completion: nil)
+    }
+    
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+        guard let selectedImage = info[.editedImage] as? UIImage else {
+            return
+        }
+        
+        picker.dismiss(animated: true) { [weak self] in
+            self?.uploadProfilePhoto(image: selectedImage)
+        }
+    }
+    
+    func uploadProfilePhoto(image: UIImage) {
+        guard let currentUser = Auth.auth().currentUser else {
+            return
+        }
+        
+        let uid = currentUser.uid
+        let storageRef = Storage.storage().reference().child("profile_images/\(uid).png")
+        
+        guard let imageData = image.pngData() else {
+            return
+        }
+        
+        storageRef.putData(imageData, metadata: nil) { [weak self] _, error in
+            guard error == nil else {
+                self?.showError(error!.localizedDescription)
+                return
+            }
+            
+            storageRef.downloadURL { [weak self] url, error in
+                guard let url = url, error == nil else {
+                    self?.showError(error!.localizedDescription)
+                    return
+                }
+                
+                let urlString = url.absoluteString
+                
+                let db = Firestore.firestore()
+                
+                db.collection("users").document(uid).updateData(["profile_photo_url": urlString]) { error in
+                    if let error = error {
+                        self?.showError(error.localizedDescription)
+                    } else {
+                        self?.loadUserData()
+                    }
+                }
+            }
+        }
+    }
+}
+
+
