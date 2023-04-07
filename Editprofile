@@ -1,6 +1,6 @@
 import UIKit
-import FirebaseDatabase
 import FirebaseAuth
+import FirebaseDatabase
 import FirebaseStorage
 
 struct EditProfileFormModel {
@@ -9,20 +9,17 @@ struct EditProfileFormModel {
     var value: String?
 }
 
-final class EditProfileViewController: UIViewController, UITableViewDataSource, UITableViewDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-
-    var ref: DatabaseReference!
-    var storageRef: StorageReference!
-
+final class EditProfileViewController: UIViewController, FormTableViewCellDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate, UITableViewDataSource, UITableViewDelegate {
     private let tableView: UITableView = {
         let tableView = UITableView()
         tableView.register(FormTableViewCell.self,
                            forCellReuseIdentifier: FormTableViewCell.identifier)
         return tableView
     }()
-
+    
     private var models = [[EditProfileFormModel]]()
-
+    private var selectedImage: UIImage?
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         configureModels()
@@ -36,15 +33,13 @@ final class EditProfileViewController: UIViewController, UITableViewDataSource, 
                                                             target: self,
                                                             action: #selector(didTapSave))
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "Cancel",
-                                                            style: .plain,
-                                                            target: self,
-                                                            action: #selector(didTapCancel))
-        ref = Database.database().reference()
-        storageRef = Storage.storage().reference()
-        getUserProfile()
+                                                           style: .plain,
+                                                           target: self,
+                                                           action: #selector(didTapCancel))
     }
-
+    
     private func configureModels() {
+        // name, username, bio
         let section1Labels = ["Name", "Username", "Bio"]
         var section1 = [EditProfileFormModel]()
         for label in section1Labels {
@@ -52,7 +47,8 @@ final class EditProfileViewController: UIViewController, UITableViewDataSource, 
             section1.append(model)
         }
         models.append(section1)
-
+        
+        // email, phone, gender
         let section2Labels = ["Email", "Phone", "Gender"]
         var section2 = [EditProfileFormModel]()
         for label in section2Labels {
@@ -61,12 +57,13 @@ final class EditProfileViewController: UIViewController, UITableViewDataSource, 
         }
         models.append(section2)
     }
-
+    
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         tableView.frame = view.bounds
     }
-
+    
+    // MARK: - Tableview
     private func createTableHeaderView() -> UIView {
         let header = UIView(frame: CGRect(x: 0,
                                           y: 0,
@@ -84,158 +81,266 @@ final class EditProfileViewController: UIViewController, UITableViewDataSource, 
         profilePhotoButton.addTarget(self,
                                      action: #selector(didTapProfilePhotoButton),
                                      for: .touchUpInside)
-
+        
         profilePhotoButton.setBackgroundImage(UIImage(systemName: "person.circle"),
                                               for: .normal)
         profilePhotoButton.layer.borderWidth = 1
         profilePhotoButton.layer.borderColor = UIColor.secondarySystemBackground.cgColor
-        return header
-    }
-
+        
+        // Fetch the user's profile data from the Firebase database
+        let uid = Auth.auth().currentUser?.uid ?? ""
+            let ref = Database.database().reference().child("users/\(uid)/profile")
+            ref.observeSingleEvent(of: .value, with: { [weak self] (snapshot) in
+                guard let value = snapshot.value as? [String: Any] else {
+                    return
+                }
+                
+                // Update the header view with the user's profile data
+                if let urlString = value["profile_picture"] as? String,
+                   let url = URL(string: urlString),
+                   let data = try? Data(contentsOf: url),
+                   let image = UIImage(data: data)?.scalePreservingAspectRatio(targetSize: CGSize(width: size, height: size)) {
+                    profilePhotoButton.setBackgroundImage(image, for: .normal)
+                }
+                
+                for section in 0..<self?.models.count ?? 0 {
+                    for row in 0..<self?.models[section].count ?? 0 {
+                        let label = self?.models[section][row].label.lowercased() ?? ""
+                        if let text = value[label] as? String {
+                            self?.models[section][row].value = text
+                        }
+                    }
+                }
+                
+                self?.tableView.reloadData()
+            })
+            
+            return header
+        }
+    
     @objc private func didTapProfilePhotoButton() {
-        let actionSheet = UIAlertController(title: "Profile Picture",
-                                            message: "Change profile picture",
-                                            preferredStyle: .actionSheet)
-        actionSheet.addAction(UIAlertAction(title: "Take Photo", style: .default, handler: { _ in
-            self.presentImagePickerController(sourceType: .camera)
+        let actionSheet = UIAlertController(title: "Profile Picture", message: "Change profile picture", preferredStyle: .actionSheet)
+        actionSheet.addAction(UIAlertAction(title: "Take Photo", style: .default, handler: { [weak self] _ in
+            // Handle take photo button
+            self?.presentImagePickerController(sourceType: .camera)
         }))
-        actionSheet.addAction(UIAlertAction(title: "Choose from Library", style: .default, handler: { _ in
-            self.presentImagePickerController(sourceType: .photoLibrary)
+        actionSheet.addAction(UIAlertAction(title: "Choose from Library", style: .default, handler: { [weak self] _ in
+            // Handle choose from library button
+            self?.presentImagePickerController(sourceType: .photoLibrary)
         }))
         actionSheet.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
-
+        
         actionSheet.popoverPresentationController?.sourceView = view
         actionSheet.popoverPresentationController?.sourceRect = view.bounds
-
+        
         present(actionSheet, animated: true)
     }
 
+    private func uploadImage(_ image: UIImage, to path: String, completion: @escaping (Result<URL, Error>) -> Void) {
+        guard let imageData = image.pngData() else {
+            print("Failed to convert image to png data")
+            return
+        }
+        
+        let storageRef = Storage.storage().reference()
+        let fileRef = storageRef.child(path)
+        
+        let metadata = StorageMetadata()
+        metadata.contentType = "image/png"
+        
+        fileRef.putData(imageData, metadata: metadata) { (metadata, error) in
+            guard let _ = metadata else {
+                print("Failed to upload image: \(error?.localizedDescription ?? "Unknown error")")
+                completion(.failure(error!))
+                return
+            }
+            
+            fileRef.downloadURL { (url, error) in
+                guard let downloadURL = url else {
+                    print("Failed to get download URL: \(error?.localizedDescription ?? "Unknown error")")
+                    completion(.failure(error!))
+                    return
+                }
+                
+                completion(.success(downloadURL))
+            }
+        }
+    }
+
+    private func presentImagePickerController(sourceType: UIImagePickerController.SourceType) {
+        let imagePickerController = UIImagePickerController()
+        imagePickerController.sourceType = sourceType
+        imagePickerController.allowsEditing = true
+        imagePickerController.delegate = self
+        present(imagePickerController, animated: true)
+    }
+
+    // MARK: - UIImagePickerControllerDelegate
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+        picker.dismiss(animated: true, completion: nil)
+        guard let image = info[.editedImage] as? UIImage else {
+            return
+        }
+        
+        // Resize the image to a maximum width or height of 1000 pixels
+        let size = CGSize(width: 1000, height: 1000)
+        guard let scaledImage = image.scalePreservingAspectRatio(targetSize: size).pngData(),
+              let uiImage = UIImage(data: scaledImage) else {
+            return
+        }
+        
+        // Upload the image to Firebase Storage
+        guard let uid = Auth.auth().currentUser?.uid else {
+            return
+        }
+        
+        let path = "profile_images/\(uid)/profile_photo.png"
+        uploadImage(uiImage, to: path) { [weak self] (result: Result<URL, Error>) in
+            // Handle the result
+            guard let strongSelf = self else {
+                return
+            }
+            
+            switch result {
+            case .success(let downloadURL):
+                // Update the user's profile with the new profile picture URL
+                let data = ["profile_picture": downloadURL.absoluteString]
+                let ref = Database.database().reference().child("users/\(uid)/profile")
+                ref.updateChildValues(data) { [weak self] (error, _) in
+                    guard error == nil else {
+                        // An error occurred while updating the profile
+                        let alert = UIAlertController(title: "Error", message: "An error occurred while updating your profile. Please try again later.", preferredStyle: .alert)
+                        alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+                        self?.present(alert, animated: true, completion: nil)
+                        return
+                    }
+                    
+                    // Profile updated successfully
+                    self?.dismiss(animated: true, completion: nil)
+                }
+            case .failure(let error):
+                // An error occurred while uploading the image
+                let alert = UIAlertController(title: "Error", message: "An error occurred while uploading your profile picture. Please try again later.", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+                self?.present(alert, animated: true, completion: nil)
+            }
+        }
+    }
+
+
+    // MARK: - FormTableViewCellDelegate
+    func formTableViewCell(_ cell: FormTableViewCell, didUpdateField updatedModel: EditProfileFormModel) {
+        // Update the model with the new value
+        guard let indexPath = tableView.indexPath(for: cell) else {
+            return
+        }
+        
+        models[indexPath.section][indexPath.row].value = updatedModel.value
+    }
+
+    // MARK: - Actions
+    @objc private func didTapSave() {
+        // Save changes to the user's profile
+        guard let uid = Auth.auth().currentUser?.uid else {
+            return
+        }
+        
+        var data = [String: String]()
+        for section in models {
+            for field in section {
+                guard let value = field.value, !value.trimmingCharacters(in: .whitespaces).isEmpty else {
+                    continue
+                }
+                
+                data[field.label.lowercased()] = value
+            }
+        }
+        
+        let ref = Database.database().reference().child("users/\(uid)/profile")
+        ref.updateChildValues(data) { [weak self] (error, _) in
+            guard error == nil else {
+                // An error occurred while updating the profile
+                let alert = UIAlertController(title: "Error", message: "An error occurred while updating your profile. Please try again later.", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+                self?.present(alert, animated: true, completion: nil)
+                return
+            }
+            
+            // Profile updated successfully
+            self?.dismiss(animated: true, completion: nil)
+        }
+        
+        // Update the header view with the new user profile data
+        if let profilePhoto = selectedImage {
+            // Upload the new profile picture to Firebase Storage
+            let path = "profile_images/\(uid)/profile_photo.png"
+            uploadImage(profilePhoto, to: path) { [weak self] (result: Result<URL, Error>) in
+                // Handle the result
+                switch result {
+                case .success(let downloadURL):
+                    // Update the user's profile with the new profile picture URL
+                    let data = ["profile_picture": downloadURL.absoluteString]
+                    ref.updateChildValues(data) { [weak self] (error, _) in
+                        guard error == nil else {
+                             // An error occurred while updating the profile
+                             let alert = UIAlertController(title: "Error", message: "An error occurred while updating your profile. Please try again later.", preferredStyle: .alert)
+                             alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+                             self?.present(alert, animated: true, completion: nil)
+                             return
+                        }
+                                
+                        // Profile updated successfully
+                        self?.dismiss(animated: true, completion: nil)
+                    }
+                            
+                        // Update the header view with the new profile picture
+                        profilePhotoButton.setBackgroundImage(profilePhoto, for: .normal)
+                        case .failure(let error):
+                            // An error occurred while uploading the image
+                            let alert = UIAlertController(title: "Error", message: "An error occurred while uploading your profile picture. Please try again later.", preferredStyle: .alert)
+                            alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+                            self?.present(alert, animated: true, completion: nil)
+                        }
+                    }
+                }
+     
+    @objc private func didTapCancel() {
+        dismiss(animated: true, completion: nil)
+    }
+}
+
+extension EditProfileViewController {
+    // MARK: - UITableViewDataSource
     func numberOfSections(in tableView: UITableView) -> Int {
         return models.count
     }
-
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         return models[section].count
     }
-
+    
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let model = models[indexPath.section][indexPath.row]
         let cell = tableView.dequeueReusableCell(withIdentifier: FormTableViewCell.identifier,
                                                  for: indexPath) as! FormTableViewCell
-        cell.configure(with: model)
         cell.delegate = self
+        cell.configure(with: model)
         return cell
     }
-
-    func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        guard section == 1 else {
-            return nil
-        }
-        return "Private Information"
-    }
-
-    @objc private func didTapSave() {
-        updateUserProfile()
-    }
-
-    @objc private func didTapCancel() {
-        dismiss(animated: true,
-                completion: nil)
-    }
-
-    func presentImagePickerController(sourceType: UIImagePickerController.SourceType) {
-        let imagePickerController = UIImagePickerController()
-        imagePickerController.sourceType = sourceType
-        imagePickerController.delegate = self
-        imagePickerController.allowsEditing = true
-        present(imagePickerController, animated: true)
-    }
-
-    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
-        picker.dismiss(animated: true)
-
-        guard let selectedImage = info[.editedImage] as? UIImage else {
-            return
-        }
-
-        // Upload the image to Firebase Storage
-        guard let imageData = selectedImage.jpegData(compressionQuality: 0.75) else {
-            return
-        }
-
-        guard let userID = Auth.auth().currentUser?.uid else {
-            return
-        }
-
-        let imageRef = storageRef.child("profileImages/\(userID).jpg")
-        imageRef.putData(imageData, metadata: nil) { (metadata, error) in
-            if let error = error {
-                print("Error uploading image: \(error.localizedDescription)")
-            } else {
-                print("Image uploaded successfully")
-            }
-        }
-    }
-
-    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-        picker.dismiss(animated: true)
-    }
 }
-
-    extension EditProfileViewController: FormTableViewCellDelegate {
-    func formTableViewCell(_ cell: FormTableViewCell, didUpdateField updatedModel: EditProfileFormModel) {
-        // Find the updated model and update its value
-        for section in 0..<models.count {
-            for row in 0..<models[section].count {
-                if models[section][row].label == updatedModel.label {
-                    models[section][row].value = updatedModel.value
-                    return
-                }
-            }
-        }
-    }
-}
-
-        func updateUserProfile() {
-            guard let userID = Auth.auth().currentUser?.uid else { return }
-            let userProfileRef = ref.child("userProfiles").child(userID)
-            var updatedProfile: [String: Any] = [:]
-
-            for section in models {
-                for model in section {
-                if let value = model.value {
-                updatedProfile[model.label.lowercased()] = value
-            }
-        }
-    }
-
-            userProfileRef.updateChildValues(updatedProfile) { (error, _) in
-            if let error = error {
-            print("Error updating user profile: \(error.localizedDescription)")
-        } else {
-            print("User profile updated successfully")
-        }
-    }
-}
-
-        func getUserProfile() {
-            guard let userID = Auth.auth().currentUser?.uid else { return }
-            let userProfileRef = ref.child("userProfiles").child(userID)
-            userProfileRef.observeSingleEvent(of: .value) { (snapshot) in
-            if let userProfileData = snapshot.value as? [String: Any] {
-                for section in 0..<self.models.count {
-                    for row in 0..<self.models[section].count {
-                        let key = self.models[section][row].label.lowercased()
-                        let value = userProfileData[key] as? String ?? ""
-                        self.models[section][row].value = value
-                    }
-                }
-                DispatchQueue.main.async {
-                    self.tableView.reloadData()
-                }
-            } else {
-                print("Error retrieving user profile data")
-            }
-        }
+extension UIImage {
+    func scalePreservingAspectRatio(targetSize: CGSize) -> UIImage {
+        let widthRatio = targetSize.width / size.width
+        let heightRatio = targetSize.height / size.height
+        let scaleFactor = min(widthRatio, heightRatio)
+        
+        let scaledSize = CGSize(width: size.width * scaleFactor,
+                                height: size.height * scaleFactor)
+        
+        UIGraphicsBeginImageContextWithOptions(scaledSize, false, scale)
+        draw(in: CGRect(origin: .zero, size: scaledSize))
+        let scaledImage = UIGraphicsGetImageFromCurrentImageContext()!
+        UIGraphicsEndImageContext()
+        
+        return scaledImage
     }
 }
